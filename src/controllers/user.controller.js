@@ -53,45 +53,108 @@ const registerUser = async (req, res) => {
 const generateAccessAndRefreshToken = async(userId)=>{
     try {
         const user = await User.findById(userId)
-        const accessToken = user.generateAccessToken();
-        const refreshToken = user.generateRefreshToken();
+        
+        const accessToken = await user.generateAccessToken();
+        const refreshToken = await user.generateRefreshToken();
         user.refreshToken=refreshToken;
         await user.save({validateBeforeSave:false})
         return {accessToken,refreshToken}
     } catch (error) {
-        return res.josn({success:false,message:"error during generateAccessAndRefreshToken Function"})
+        console.error("Token generation error:", error.message);
+    return null;
+        
         
     }
 }
-const loginUser = async(req,res)=>{
-    const {username,email,password} = req.body;
-    if(!username||!email){
-        return res.json({success:false,message:"fill the fields"})
-    }
-    const user = await User.findOne({
-        $or:[{email},{username}]
-    })
-    if(!user){
-        return res.json({success:false,message:"user not exists"})
-    }
-    const isPassword = await user.isPasswordCorrect(password)
-    const {accessToken,refreshToken} = await generateAccessAndRefreshToken(user._id);
-    const loggedInUser = await User.findById(user._id).select(
-        "-password -refreshToken"
-    )
-    const options = {
-        httpOnly:true,
-        secure:true
+const loginUser = async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
 
+    // Validate required fields
+    if (!username && !email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Username or email is required" });
+    }
+
+    // Find user by email OR username
+    const user = await User.findOne({
+      $or: [{ email }, { username }],
+    });
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User does not exist" });
+    }
+
+    // Validate password
+    const isPassword = await user.isPasswordCorrect(password);
+    if (!isPassword) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
+    }
+
+    // Generate tokens
+    const tokens = await generateAccessAndRefreshToken(user._id);
+    if (!tokens) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to generate tokens" });
+    }
+
+    const { accessToken, refreshToken } = tokens;
+
+    // Fetch user info without password/refreshToken
+    const loggedInUser = await User.findById(user._id).select(
+      "-password -refreshToken"
+    );
+
+    // Cookie options
+    const options = {
+      httpOnly: true,
+      secure: true, // set to true in production with HTTPS
+    };
+
+    return res
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", refreshToken, options)
+      .status(200)
+      .json({
+        success: true,
+        message: "User login successful",
+        user: loggedInUser,
+      });
+  } catch (error) {
+    console.error("Login error:", error.message);
+    return res
+      .status(500)
+      .json({ success: false, message: "Something went wrong" });
+  }
+};
+const logoutUser = async(req,res)=>{
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $unset: {
+                refreshToken: 1 // this removes the field from document
+            }
+        },
+        {
+            new: true
+        }
+    )
+
+    const options = {
+        httpOnly: true,
+        secure: true
     }
     return res
-    .cookie("accessToken",accessToken,options)
-    .cookie("refreshToken",refreshToken,options)
-    .json({success:true,message:"user login successfully"})
+    .clearCookie("accessToken",options)
+    .clearCookie("refreshToke",options)
+    .json({success:true,message:"user logout successfully"})
 
-
-}
-const logoutUser = async(req,res)=>{
 
 }
 
