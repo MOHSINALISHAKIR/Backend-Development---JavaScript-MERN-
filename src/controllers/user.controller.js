@@ -50,5 +50,46 @@ const registerUser = async (req, res) => {
         return res.status(500).json({ success: false, message: "Server error" });
     }
 };
+const generateAccessAndRefreshToken = async(userId)=>{
+    try {
+        const user = await User.findById(userId)
+        const accessToken = user.generateAccessToken();
+        const refreshToken = user.generateRefreshToken();
+        user.refreshToken=refreshToken;
+        await user.save({validateBeforeSave:false})
+        return {accessToken,refreshToken}
+    } catch (error) {
+        return res.josn({success:false,message:"error during generateAccessAndRefreshToken Function"})
+        
+    }
+}
+const loginUser = async(req,res)=>{
+    const {username,email,password} = req.body;
+    if(!username||!email){
+        return res.json({success:false,message:"fill the fields"})
+    }
+    const user = await User.findOne({
+        $or:[{email},{username}]
+    })
+    if(!user){
+        return res.json({success:false,message:"user not exists"})
+    }
+    const isPassword = await user.isPasswordCorrect(password)
+    const {accessToken,refreshToken} = await generateAccessAndRefreshToken(user._id);
+    const loggedInUser = await User.findById(user._id).select(
+        "-password -refreshToken"
+    )
+    const options = {
+        httpOnly:true,
+        secure:true
+
+    }
+    return res
+    .cookie("accessToken",accessToken,options)
+    .cookie("refreshToken",refreshToken,options)
+    .json({success:true,message:"user login successfully"})
+
+
+}
 
 export { registerUser };
